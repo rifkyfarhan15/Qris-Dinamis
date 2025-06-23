@@ -20,11 +20,13 @@ const bot = new TelegramBot(process.env.TOKEN_BOTMU, { polling: true });
 
 const userStates = {};
 const qrisExpiration = new Map();
+const userLastRequest = new Map();
 
-const EXPIRATION_TIME = 30 * 60 * 1000;
+const EXPIRATION_TIME = 10 * 60 * 1000; // 10 menit
+const RATE_LIMIT_TIME = 30 * 1000; // 30 detik
 
 const generateRandomDigits = () => {
-    return Math.floor(Math.random() * 900) + 100;
+    return Math.floor(Math.random() * (200 - 10 + 1)) + 10;
 };
 
 const cleanupExpiredQRIS = async (chatId, filePath) => {
@@ -44,26 +46,25 @@ const readQRCode = (imagePath) => {
         Jimp.read(imagePath)
             .then(image => {
                 const qr = new QrCode();
-                
                 qr.callback = (err, value) => {
                     if (err) {
                         reject(new Error('Gagal membaca QR Code: ' + err.message));
                         return;
                     }
-                    
+
                     if (!value || !value.result) {
                         reject(new Error('QR Code tidak terdeteksi'));
                         return;
                     }
-                    
+
                     if (!value.result.includes('00020101')) {
                         reject(new Error('Bukan format QRIS yang valid'));
                         return;
                     }
-                    
+
                     resolve(value.result);
                 };
-                
+
                 qr.decode(image.bitmap);
             })
             .catch(err => {
@@ -72,21 +73,47 @@ const readQRCode = (imagePath) => {
     });
 };
 
+// Command /start
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
     bot.sendMessage(chatId, 'Selamat datang di Bot QRIS Dinamis!\n\nUntuk menggunakan bot ini:\n1. Kirim foto QRIS statis\n2. Bot akan meminta nominal\n3. Masukkan nominal (angka saja)\n4. Bot akan mengirim QRIS dinamis yang berlaku selama 30 menit');
 });
 
+// Command /cancel
+bot.onText(/\/cancel/, (msg) => {
+    const chatId = msg.chat.id;
+
+    if (userStates[chatId]) {
+        cleanupExpiredQRIS(chatId, userStates[chatId].filePath);
+        bot.sendMessage(chatId, 'Proses dibatalkan. Silakan kirim QR lagi jika ingin mulai ulang.');
+    } else {
+        bot.sendMessage(chatId, 'Tidak ada proses yang sedang berjalan.');
+    }
+});
+
+// Saat user kirim foto
 bot.on('photo', async (msg) => {
     const chatId = msg.chat.id;
+
+    // Rate limiting
+    const lastRequestTime = userLastRequest.get(chatId) || 0;
+    const now = Date.now();
+
+    if (now - lastRequestTime < RATE_LIMIT_TIME) {
+        const waitSeconds = Math.ceil((RATE_LIMIT_TIME - (now - lastRequestTime)) / 1000);
+        return bot.sendMessage(chatId, `Tunggu ${waitSeconds} detik sebelum mengirim QR lagi.`);
+    }
+
+    userLastRequest.set(chatId, now);
+
     try {
         const photo = msg.photo[msg.photo.length - 1];
         const filePath = path.join(__dirname, `temp_${chatId}.jpg`);
-        
+
         const fileStream = await bot.getFile(photo.file_id);
         const downloadedFile = await bot.downloadFile(fileStream.file_id, __dirname);
         await fs.rename(downloadedFile, filePath);
-        
+
         const qrisString = await readQRCode(filePath);
 
         userStates[chatId] = {
@@ -103,9 +130,11 @@ bot.on('photo', async (msg) => {
     }
 });
 
+// Saat user kirim nominal (angka)
 bot.on('text', async (msg) => {
     const chatId = msg.chat.id;
-    
+
+    // Jika bukan dalam proses input nominal atau command
     if (!userStates[chatId] || msg.text.startsWith('/')) {
         return;
     }
@@ -114,6 +143,9 @@ bot.on('text', async (msg) => {
         const baseNominal = parseInt(msg.text);
         if (isNaN(baseNominal)) {
             throw new Error('Nominal harus berupa angka');
+        }
+        if (baseNominal < 1000) {
+            throw new Error('Nominal minimal adalah Rp 1.000');
         }
 
         const randomDigits = generateRandomDigits();
@@ -128,13 +160,23 @@ bot.on('text', async (msg) => {
             timeout: setTimeout(() => cleanupExpiredQRIS(chatId, outputPath), EXPIRATION_TIME)
         });
 
-        const expirationTimeString = new Date(expirationTime).toLocaleTimeString('id-ID', { 
-            hour: '2-digit', 
-            minute: '2-digit' 
+        const expirationTimeString = new Date(expirationTime).toLocaleTimeString('id-ID', {
+            hour: '2-digit',
+            minute: '2-digit'
         });
 
+        const tanggal = new Date().toLocaleDateString('id-ID', {
+    weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
+        });
+
+        const orderId = `ORD-${chatId}-${Date.now().toString().slice(-6)}`;
+
         await bot.sendPhoto(chatId, outputPath, {
-            caption: `QRIS Dinamis dengan nominal Rp ${finalNominal.toLocaleString('id-ID')}\nBerlaku hingga: ${expirationTimeString} (30 menit)`
+            caption: caption: `🧾 QRIS Dinamis
+🆔 Order ID: ${orderId}
+📅 Tanggal: ${tanggal}
+💵 Nominal: Rp ${finalNominal.toLocaleString('id-ID')}
+⏳ Berlaku hingga: ${expirationTimeString} (10 menit)`
         });
 
         await fs.unlink(userStates[chatId].filePath);
@@ -147,10 +189,12 @@ bot.on('text', async (msg) => {
     }
 });
 
+// Jika polling error
 bot.on('polling_error', (error) => {
     console.error('Polling error:', error);
 });
 
+// Saat proses dihentikan
 process.on('SIGINT', async () => {
     for (const [chatId, data] of qrisExpiration.entries()) {
         clearTimeout(data.timeout);
