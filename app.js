@@ -163,11 +163,13 @@ bot.on('text', async (msg) => {
 
     try {
         const baseNominal = parseInt(msg.text);
-        if (isNaN(baseNominal)) throw new Error('Nominal harus berupa angka');
+        if (isNaN(baseNominal)) {
+            throw new Error('Nominal harus berupa angka');
+        }
 
-        const kodeUnik = generateRandomDigits();
-        const finalNominal = parseInt(`${baseNominal.toString().slice(0, -1)}${kodeUnik}`); // ganti 1 digit terakhir
-
+        const randomDigits = generateRandomDigits();
+        const finalNominal = parseInt(`${baseNominal}${randomDigits}`);
+        
         const outputPath = path.join(__dirname, `qris_dynamic_${chatId}.jpg`);
         await qrisDinamis(userStates[chatId].qrisString, finalNominal, outputPath);
 
@@ -186,10 +188,12 @@ bot.on('text', async (msg) => {
             weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
         });
 
-        const orderId = `ORD-${chatId}-${kodeUnik}-${Date.now().toString().slice(-4)}`;
-
         await bot.sendPhoto(chatId, outputPath, {
-            caption: `🧾 QRIS Dinamis\n🆔 Order ID: ${orderId}\n📅 Tanggal: ${tanggal}\n💵 Nominal: Rp ${finalNominal.toLocaleString('id-ID')}\n📌 Dari input: ${baseNominal.toLocaleString('id-ID')} + kode unik ${kodeUnik}\n⏳ Berlaku hingga: ${expirationTimeString} (10 menit)`
+            caption: `caption: 🧾 QRIS Dinamis
+🆔 Order ID: ${orderId}
+📅 Tanggal: ${tanggal}
+💵 Nominal: Rp ${finalNominal.toLocaleString('id-ID')}
+⏳ Berlaku hingga: ${expirationTimeString} (10 menit)`
         });
 
         if (userStates[chatId].filePath) await fs.unlink(userStates[chatId].filePath);
