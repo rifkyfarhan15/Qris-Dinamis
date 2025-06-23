@@ -79,6 +79,7 @@ bot.onText(/\/start/, (msg) => {
     bot.sendMessage(chatId, 'Selamat datang di Bot QRIS Dinamis!\n\nUntuk menggunakan bot ini:\n1. Kirim foto QRIS statis\n2. Bot akan meminta nominal\n3. Masukkan nominal (angka saja)\n4. Bot akan mengirim QRIS dinamis yang berlaku selama 30 menit');
 });
 
+// Command /status
 bot.onText(/\/status/, (msg) => {
     const chatId = msg.chat.id;
     const info = qrisExpiration.get(chatId);
@@ -92,15 +93,17 @@ bot.onText(/\/status/, (msg) => {
 });
 
 // Command /cancel
-bot.onText(/\/status/, (msg) => {
+bot.onText(/\/cancel/, (msg) => {
     const chatId = msg.chat.id;
-    const info = qrisExpiration.get(chatId);
 
-    if (info) {
-        const waktu = new Date(Date.now() + info.timeout._idleTimeout - info.timeout._idleStart);
-        bot.sendMessage(chatId, `QRIS masih aktif hingga sekitar ${waktu.toLocaleTimeString('id-ID')}`);
+    const currentState = userStates[chatId] || qrisExpiration.get(chatId);
+    const filePath = currentState?.filePath || currentState?.path;
+
+    if (filePath) {
+        cleanupExpiredQRIS(chatId, filePath);
+        bot.sendMessage(chatId, 'Proses dibatalkan dan QRIS dihapus.');
     } else {
-        bot.sendMessage(chatId, 'Tidak ada QRIS aktif saat ini.');
+        bot.sendMessage(chatId, 'Tidak ada proses yang sedang berjalan.');
     }
 });
 
