@@ -79,15 +79,28 @@ bot.onText(/\/start/, (msg) => {
     bot.sendMessage(chatId, 'Selamat datang di Bot QRIS Dinamis!\n\nUntuk menggunakan bot ini:\n1. Kirim foto QRIS statis\n2. Bot akan meminta nominal\n3. Masukkan nominal (angka saja)\n4. Bot akan mengirim QRIS dinamis yang berlaku selama 30 menit');
 });
 
-// Command /cancel
-bot.onText(/\/cancel/, (msg) => {
+bot.onText(/\/status/, (msg) => {
     const chatId = msg.chat.id;
+    const info = qrisExpiration.get(chatId);
 
-    if (userStates[chatId]) {
-        cleanupExpiredQRIS(chatId, userStates[chatId].filePath);
-        bot.sendMessage(chatId, 'Proses dibatalkan. Silakan kirim QR lagi jika ingin mulai ulang.');
+    if (info) {
+        const waktu = new Date(Date.now() + info.timeout._idleTimeout - info.timeout._idleStart);
+        bot.sendMessage(chatId, `QRIS masih aktif hingga sekitar ${waktu.toLocaleTimeString('id-ID')}`);
     } else {
-        bot.sendMessage(chatId, 'Tidak ada proses yang sedang berjalan.');
+        bot.sendMessage(chatId, 'Tidak ada QRIS aktif saat ini.');
+    }
+});
+
+// Command /cancel
+bot.onText(/\/status/, (msg) => {
+    const chatId = msg.chat.id;
+    const info = qrisExpiration.get(chatId);
+
+    if (info) {
+        const waktu = new Date(Date.now() + info.timeout._idleTimeout - info.timeout._idleStart);
+        bot.sendMessage(chatId, `QRIS masih aktif hingga sekitar ${waktu.toLocaleTimeString('id-ID')}`);
+    } else {
+        bot.sendMessage(chatId, 'Tidak ada QRIS aktif saat ini.');
     }
 });
 
@@ -143,9 +156,6 @@ bot.on('text', async (msg) => {
         const baseNominal = parseInt(msg.text);
         if (isNaN(baseNominal)) {
             throw new Error('Nominal harus berupa angka');
-        }
-        if (baseNominal < 1000) {
-            throw new Error('Nominal minimal adalah Rp 1.000');
         }
 
         const randomDigits = generateRandomDigits();
