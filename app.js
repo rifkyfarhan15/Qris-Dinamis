@@ -21,12 +21,13 @@ const bot = new TelegramBot(process.env.TOKEN_BOTMU, { polling: true });
 const userStates = {};
 const qrisExpiration = new Map();
 const userLastRequest = new Map();
+const savedQris = new Map();
 
 const EXPIRATION_TIME = 10 * 60 * 1000; // 10 menit
 const RATE_LIMIT_TIME = 30 * 1000; // 30 detik
 
 const generateRandomDigits = () => {
-    return Math.floor(Math.random() * (200 - 10 + 1)) + 10;
+    return Math.floor(Math.random() * (200 - 10 + 1)) + 10; // 3 digit random
 };
 
 const cleanupExpiredQRIS = async (chatId, filePath) => {
@@ -36,6 +37,7 @@ const cleanupExpiredQRIS = async (chatId, filePath) => {
         }
         delete userStates[chatId];
         qrisExpiration.delete(chatId);
+        // Jangan hapus savedQris supaya tetap disimpan
     } catch (error) {
         console.error('Error cleaning up files:', error);
     }
@@ -51,20 +53,16 @@ const readQRCode = (imagePath) => {
                         reject(new Error('Gagal membaca QR Code: ' + err.message));
                         return;
                     }
-
                     if (!value || !value.result) {
                         reject(new Error('QR Code tidak terdeteksi'));
                         return;
                     }
-
                     if (!value.result.includes('00020101')) {
                         reject(new Error('Bukan format QRIS yang valid'));
                         return;
                     }
-
                     resolve(value.result);
                 };
-
                 qr.decode(image.bitmap);
             })
             .catch(err => {
@@ -73,13 +71,11 @@ const readQRCode = (imagePath) => {
     });
 };
 
-// Command /start
 bot.onText(/\/start/, (msg) => {
     const chatId = msg.chat.id;
-    bot.sendMessage(chatId, 'Selamat datang di Bot QRIS Dinamis!\n\nUntuk menggunakan bot ini:\n1. Kirim foto QRIS statis\n2. Bot akan meminta nominal\n3. Masukkan nominal (angka saja)\n4. Bot akan mengirim QRIS dinamis yang berlaku selama 30 menit');
+    bot.sendMessage(chatId, 'Selamat datang di Bot QRIS Dinamis!\n\nUntuk menggunakan bot ini:\n1. Kirim foto QRIS statis\n2. Bot akan meminta nominal\n3. Masukkan nominal (angka saja)\n4. Bot akan mengirim QRIS dinamis yang berlaku selama 10 menit');
 });
 
-// Command /status
 bot.onText(/\/status/, (msg) => {
     const chatId = msg.chat.id;
     const info = qrisExpiration.get(chatId);
@@ -92,7 +88,6 @@ bot.onText(/\/status/, (msg) => {
     }
 });
 
-// Command /cancel
 bot.onText(/\/cancel/, (msg) => {
     const chatId = msg.chat.id;
 
@@ -107,11 +102,14 @@ bot.onText(/\/cancel/, (msg) => {
     }
 });
 
-// Saat user kirim foto
+bot.onText(/\/hapusqris/, (msg) => {
+    const chatId = msg.chat.id;
+    savedQris.delete(chatId);
+    bot.sendMessage(chatId, 'QRIS yang disimpan telah dihapus. Kirim ulang QRIS untuk mulai baru.');
+});
+
 bot.on('photo', async (msg) => {
     const chatId = msg.chat.id;
-
-    // Rate limiting
     const lastRequestTime = userLastRequest.get(chatId) || 0;
     const now = Date.now();
 
@@ -137,6 +135,8 @@ bot.on('photo', async (msg) => {
             filePath: filePath
         };
 
+        savedQris.set(chatId, qrisString);
+
         bot.sendMessage(chatId, 'QRIS berhasil dibaca. Silakan masukkan nominal (angka saja)');
     } catch (error) {
         bot.sendMessage(chatId, 'Terjadi kesalahan: ' + (error.message || 'Gagal membaca QR Code'));
@@ -146,23 +146,27 @@ bot.on('photo', async (msg) => {
     }
 });
 
-// Saat user kirim nominal (angka)
 bot.on('text', async (msg) => {
     const chatId = msg.chat.id;
 
-    // Jika bukan dalam proses input nominal atau command
-    if (!userStates[chatId] || msg.text.startsWith('/')) {
-        return;
+    if (!userStates[chatId] || !userStates[chatId].qrisString) {
+        const cachedQris = savedQris.get(chatId);
+        if (!cachedQris || msg.text.startsWith('/')) return;
+
+        userStates[chatId] = {
+            qrisString: cachedQris,
+            filePath: null
+        };
+
+        await bot.sendMessage(chatId, 'Menggunakan QRIS terakhir yang sudah disimpan. Silakan masukkan nominal.');
     }
 
     try {
         const baseNominal = parseInt(msg.text);
-        if (isNaN(baseNominal)) {
-            throw new Error('Nominal harus berupa angka');
-        }
+        if (isNaN(baseNominal)) throw new Error('Nominal harus berupa angka');
 
-        const randomDigits = generateRandomDigits();
-        const finalNominal = parseInt(`${baseNominal}${randomDigits}`);
+        const kodeUnik = generateRandomDigits();
+        const finalNominal = parseInt(`${baseNominal.toString().slice(0, -1)}${kodeUnik}`); // ganti 1 digit terakhir
 
         const outputPath = path.join(__dirname, `qris_dynamic_${chatId}.jpg`);
         await qrisDinamis(userStates[chatId].qrisString, finalNominal, outputPath);
@@ -179,21 +183,18 @@ bot.on('text', async (msg) => {
         });
 
         const tanggal = new Date().toLocaleDateString('id-ID', {
-    weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
+            weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
         });
 
-        const orderId = `ORD-${chatId}-${Date.now().toString().slice(-6)}`;
+        const orderId = `ORD-${chatId}-${kodeUnik}-${Date.now().toString().slice(-4)}`;
 
         await bot.sendPhoto(chatId, outputPath, {
-            caption: `🧾 QRIS Dinamis
-🆔 Order ID: ${orderId}
-📅 Tanggal: ${tanggal}
-💵 Nominal: Rp ${finalNominal.toLocaleString('id-ID')}
-⏳ Berlaku hingga: ${expirationTimeString} (10 menit)`
+            caption: `🧾 QRIS Dinamis\n🆔 Order ID: ${orderId}\n📅 Tanggal: ${tanggal}\n💵 Nominal: Rp ${finalNominal.toLocaleString('id-ID')}\n📌 Dari input: ${baseNominal.toLocaleString('id-ID')} + kode unik ${kodeUnik}\n⏳ Berlaku hingga: ${expirationTimeString} (10 menit)`
         });
 
-        await fs.unlink(userStates[chatId].filePath);
+        if (userStates[chatId].filePath) await fs.unlink(userStates[chatId].filePath);
         delete userStates[chatId];
+
     } catch (error) {
         bot.sendMessage(chatId, 'Terjadi kesalahan: ' + (error.message || 'Gagal membuat QRIS dinamis'));
         if (userStates[chatId]?.filePath) {
@@ -202,12 +203,10 @@ bot.on('text', async (msg) => {
     }
 });
 
-// Jika polling error
 bot.on('polling_error', (error) => {
     console.error('Polling error:', error);
 });
 
-// Saat proses dihentikan
 process.on('SIGINT', async () => {
     for (const [chatId, data] of qrisExpiration.entries()) {
         clearTimeout(data.timeout);
