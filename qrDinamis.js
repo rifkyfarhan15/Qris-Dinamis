@@ -1,61 +1,43 @@
 import qrcode from "qrcode";
 
+// Fungsi CRC16 untuk generate checksum QRIS
 function toCRC16(str) {
-    function charCodeAt(str, i) {
-        let get = str.substr(i, 1);
-        return get.charCodeAt();
-    }
-
     let crc = 0xffff;
-    let strlen = str.length;
-    for (let c = 0; c < strlen; c++) {
-        crc ^= charCodeAt(str, c) << 8;
+    for (let c = 0; c < str.length; c++) {
+        crc ^= str.charCodeAt(c) << 8;
         for (let i = 0; i < 8; i++) {
-            if (crc & 0x8000) {
-                crc = (crc << 1) ^ 0x1021;
-            } else {
-                crc = crc << 1;
-            }
+            crc = crc & 0x8000 ? (crc << 1) ^ 0x1021 : crc << 1;
         }
     }
-    let hex = crc & 0xffff;
-    hex = hex.toString(16).toUpperCase();
+    let hex = (crc & 0xffff).toString(16).toUpperCase();
     return hex.padStart(4, "0");
 }
 
+// Fungsi utama: mengubah QRIS statis menjadi dinamis & simpan ke file
 async function qrisDinamis(qrstring, nominal, path) {
-    let qris2 = qrstring.slice(0, -4);
-    let replaceQris = qris2.replace("010211", "010212");
-    let pecahQris = replaceQris.split("5802ID");
-    let uang =
-        "54" + ("0" + nominal.toString().length).slice(-2) + nominal + "5802ID";
-
-    let output =
-        pecahQris[0] +
-        uang +
-        pecahQris[1] +
-        toCRC16(pecahQris[0] + uang + pecahQris[1]);
+    const base = qrstring.slice(0, -4).replace("010211", "010212");
+    const parts = base.split("5802ID");
+    const nominalTag =
+        "54" + nominal.toString().padStart(2, "0") + nominal + "5802ID";
+    const payload = parts[0] + nominalTag + parts[1];
+    const crc = toCRC16(payload);
+    const output = payload + crc;
 
     await qrcode.toFile(path, output, { margin: 2, scale: 10 });
     return path;
 }
 
+// Versi buffer (tanpa file) – cocok untuk kirim ke Telegram, dsb.
 async function qrisDinamisBuffer(qrstring, nominal) {
-    let qris2 = qrstring.slice(0, -4);
-    let replaceQris = qris2.replace("010211", "010212");
-    let pecahQris = replaceQris.split("5802ID");
-    let uang =
-        "54" + ("0" + nominal.toString().length).slice(-2) + nominal + "5802ID";
+    const base = qrstring.slice(0, -4).replace("010211", "010212");
+    const parts = base.split("5802ID");
+    const nominalTag =
+        "54" + nominal.toString().padStart(2, "0") + nominal + "5802ID";
+    const payload = parts[0] + nominalTag + parts[1];
+    const crc = toCRC16(payload);
+    const output = payload + crc;
 
-    let output =
-        pecahQris[0] +
-        uang +
-        pecahQris[1] +
-        toCRC16(pecahQris[0] + uang + pecahQris[1]);
-
-    // Menghasilkan buffer QR Code
-    const qrBuffer = await qrcode.toBuffer(output, { margin: 2, scale: 10 });
-    return qrBuffer;
+    return await qrcode.toBuffer(output, { margin: 2, scale: 10 });
 }
 
 export { qrisDinamis, qrisDinamisBuffer, toCRC16 };
