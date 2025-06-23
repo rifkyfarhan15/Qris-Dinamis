@@ -172,7 +172,7 @@ bot.on('text', async (msg) => {
         const orderId = `ORD-${chatId}-${Date.now().toString().slice(-6)}`;
 
         await bot.sendPhoto(chatId, outputPath, {
-            caption: caption: `🧾 QRIS Dinamis
+            caption: `🧾 QRIS Dinamis
 🆔 Order ID: ${orderId}
 📅 Tanggal: ${tanggal}
 💵 Nominal: Rp ${finalNominal.toLocaleString('id-ID')}
