@@ -188,6 +188,8 @@ bot.on('text', async (msg) => {
             weekday: 'short', day: '2-digit', month: 'short', year: 'numeric'
         });
 
+        const orderId = ORD-${chatId}-${Date.now().toString().slice(-6)};
+
         await bot.sendPhoto(chatId, outputPath, {
             caption: `caption: 🧾 QRIS Dinamis
 🆔 Order ID: ${orderId}
